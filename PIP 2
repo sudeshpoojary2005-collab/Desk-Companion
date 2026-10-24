@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0b0f10">
+<title>Pip – Desk Companion</title>
+<style>
+:root{--bg:#0b0f10;--ink:#e8ecea;--mute:#8a9593;--eye:#7ff3ea;--line:#2a3335;--panel:#161b1c;
+box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{height:100%;margin:0;overflow:hidden}
+body{background:var(--bg);color:var(--ink);font:16px/1.4 system-ui,-apple-system,"Segoe UI",sans-serif;display:flex;flex-direction:column;padding:0 12px 12px}
+#stage{flex:1;min-height:0;display:flex;align-items:center;justify-content:center}
+svg{width:100%;height:100%;max-height:100%}
+.eye{fill:var(--eye);filter:drop-shadow(0 0 14px var(--eye))}
+.pupil{fill:var(--bg)}.shine{fill:#fff;opacity:.9}
+#say{text-align:center;min-height:2.8em;font-size:18px;padding:0 6px}
+#status{text-align:center;color:var(--mute);font-size:13px;margin:2px 0 10px}
+.bar{display:flex;gap:8px;justify-content:center;flex-wrap:wrap}
+button{min-height:48px;padding:0 16px;border-radius:24px;border:1px solid var(--line);background:var(--panel);color:var(--ink);font:inherit;touch-action:manipulation}
+button.big{background:var(--eye);color:#06201e;border-color:var(--eye);font-weight:600;padding:0 28px}
+button.on{outline:2px solid var(--eye)}
+#kb{display:none;gap:8px;margin-top:8px}
+#kb.show{display:flex}
+input{flex:1;min-width:0;min-height:48px;padding:0 16px;border-radius:24px;border:1px solid var(--line);background:var(--panel);color:var(--ink);font-size:16px}
+video{position:fixed;right:12px;top:calc(12px + env(safe-area-inset-top,0px));width:90px;border-radius:12px;display:none;opacity:.9}
+video.show{display:block}
+</style>
+</head>
+<body>
+<video id="vid" muted playsinline></video>
+<div id="stage">
+<svg viewBox="20 20 360 170" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Pip’s animated eyes">
+  <g id="eyeL"><rect class="eye" x="45" y="35" width="110" height="140" rx="48"/><g id="pL"><circle class="pupil" cx="100" cy="105" r="30"/><circle class="shine" cx="90" cy="94" r="7"/></g></g>
+  <g id="eyeR"><rect class="eye" x="245" y="35" width="110" height="140" rx="48"/><g id="pR"><circle class="pupil" cx="300" cy="105" r="30"/><circle class="shine" cx="290" cy="94" r="7"/></g></g>
+</svg>
+</div>
+<div id="say">Tap Wake Pip up to begin.</div>
+<div id="status">asleep</div>
+<div class="bar">
+  <button id="go" class="big">Wake Pip up</button>
+  <button id="flip">Flip cam</button>
+  <button id="prev">Preview</button>
+  <button id="kbBtn">Keyboard</button>
+  <button id="fs">Full screen</button>
+  <button id="brainBtn">Brain</button>
+</div>
+<div id="cfg" style="display:none;margin-top:8px;gap:8px;flex-direction:column">
+  <div style="color:var(--mute);font-size:13px">Optional: paste a free Gemini API key (from aistudio.google.com) for real conversations. It stays on this phone only. Leave blank to use Pip’s built-in skills.</div>
+  <div style="display:flex;gap:8px"><input id="key" type="password" placeholder="Gemini API key" autocomplete="off"><button id="saveKey" class="big">Save</button></div>
+</div>
+<div id="kb"><input id="q" placeholder="Type to Pip…" autocomplete="off" enterkeyhint="send"><button id="send" class="big">Ask</button></div>
+
+<script>
+const $=id=>document.getElementById(id);
+const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+const S={tx:0,ty:0,px:0,py:0,mood:'asleep',blink:0,nextBlink:2,lastMotion:0,idleT:0,cam:false,active:false,busy:false,facing:'user'};
+function setMood(m){S.mood=m;$('status').textContent=m}
+function say(t){$('say').textContent=t}
+
+// ---------- Eye animation ----------
+let t0=performance.now();
+function frame(now){
+  const dt=Math.min((now-t0)/1000,.1);t0=now;const t=now/1000;
+  if(now-S.lastMotion>4000){S.idleT-=dt;if(S.idleT<=0){S.tx=(Math.random()*2-1)*.7;S.ty=(Math.random()*2-1)*.4;S.idleT=1.5+Math.random()*2.5}}
+  const k=1-Math.pow(.0005,dt);
+  S.px+=(S.tx-S.px)*k;S.py+=(S.ty-S.py)*k;
+  S.nextBlink-=dt;if(S.nextBlink<=0){S.blink=.18;S.nextBlink=2+Math.random()*4}
+  let b=1;if(S.blink>0){S.blink-=dt;b=1-.92*clamp(1-Math.abs(S.blink/.18-.5)*2,0,1)}
+  let sy=1,sy2=1,tilt=0;
+  const m=S.mood;
+  if(m==='asleep'){sy=sy2=.12+Math.sin(t*1.2)*.02;S.tx=S.ty=0}
+  else if(m==='happy'){sy=sy2=.62+Math.sin(t*6)*.03}
+  else if(m==='thinking'){sy=.95;sy2=.7;tilt=-4;S.tx=.6;S.ty=-.6}
+  else if(m==='listening'){sy=sy2=1.06}
+  else if(m==='speaking'){sy=sy2=.9+Math.abs(Math.sin(t*9))*.12}
+  const ox=S.px*14,oy=S.py*10;
+  const set=(g,p,s,rot,cx)=>{
+    $(g).setAttribute('transform',`translate(${ox} ${oy}) translate(${cx} 105) rotate(${rot}) scale(1 ${(s*b).toFixed(3)}) translate(${-cx} -105)`);
+    $(p).setAttribute('transform',`translate(${S.px*22} ${S.py*26})`);
+  };
+  set('eyeL','pL',sy,tilt,100);set('eyeR','pR',sy2,0,300);
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+
+// ---------- Camera + motion tracking ----------
+const W=40,H=30,cv=document.createElement('canvas');cv.width=W;cv.height=H;
+const cx=cv.getContext('2d',{willReadFrequently:true});
+let prev=null,lastGreet=0;
+setInterval(()=>{
+  if(!S.cam||!S.active)return;
+  try{
+    cx.drawImage($('vid'),0,0,W,H);
+    const d=cx.getImageData(0,0,W,H).data,g=new Uint8Array(W*H);let sx=0,sy=0,n=0;
+    for(let i=0;i<W*H;i++){
+      g[i]=d[i*4]*.3+d[i*4+1]*.59+d[i*4+2]*.11;
+      if(prev&&Math.abs(g[i]-prev[i])>28){sx+=i%W;sy+=(i/W|0);n++}
+    }
+    prev=g;
+    if(n>10){
+      let mx=(sx/n)/(W-1);if(S.facing==='user')mx=1-mx;  // mirror front cam so Pip looks at you
+      S.tx=clamp((mx-.5)*2.4,-1,1);S.ty=clamp(((sy/n)/(H-1)-.5)*2.4,-1,1);
+      const now=performance.now();
+      if(S.mood==='listening'&&now-S.lastMotion>10000&&now-lastGreet>30000){lastGreet=now;setMood('happy');setTimeout(()=>{if(S.mood==='happy')listen()},1200)}
+      S.lastMotion=now;
+    }
+  }catch(e){}
+},66);
+
+async function startCam(){
+  stopCam();
+  try{
+    const st=await navigator.mediaDevices.getUserMedia({video:{facingMode:S.facing,width:320,height:240},audio:false});
+    const v=$('vid');v.srcObject=st;await v.play();S.cam=true;prev=null;return true;
+  }catch(e){
+    say(e&&e.name==='NotAllowedError'?'Camera blocked. Allow camera access for this page in your browser settings.':'I can’t reach a camera here. I’ll follow your finger instead.');
+    return false;
+  }
+}
+function stopCam(){const v=$('vid');if(v.srcObject){v.srcObject.getTracks().forEach(t=>t.stop());v.srcObject=null}S.cam=false}
+
+addEventListener('pointermove',e=>{if(S.cam)return;S.tx=clamp((e.clientX/innerWidth-.5)*2,-1,1);S.ty=clamp((e.clientY/innerHeight-.5)*2,-1,1);S.lastMotion=performance.now()});
+addEventListener('pointerdown',e=>{if(S.cam||e.target.closest('button,input'))return;S.tx=clamp((e.clientX/innerWidth-.5)*2,-1,1);S.ty=clamp((e.clientY/innerHeight-.5)*2,-1,1);S.lastMotion=performance.now()});
+
+// ---------- Brain (all free) ----------
+let history=[];
+const store={get:k=>{try{return localStorage.getItem(k)||''}catch(e){return''}},set:(k,v)=>{try{localStorage.setItem(k,v)}catch(e){}}};
+const PERSONA="You are Pip, a small, curious, friendly desk companion with big glowing eyes, living on the user’s phone on their desk. Reply in one or two short, warm, spoken-style sentences. Plain text only: no markdown, no lists, no emoji. If you can’t know something live, say so briefly.";
+async function gemini(q,key){
+  history.push({role:'user',parts:[{text:q}]});history=history.slice(-8);
+  while(history.length&&history[0].role!=='user')history.shift();
+  const r=await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent',{
+    method:'POST',headers:{'Content-Type':'application/json','x-goog-api-key':key},
+    body:JSON.stringify({systemInstruction:{parts:[{text:PERSONA}]},contents:history,generationConfig:{maxOutputTokens:120}})});
+  if(!r.ok)throw new Error('gemini '+r.status);
+  const j=await r.json();
+  const t=(j.candidates?.[0]?.content?.parts?.map(p=>p.text).join('')||'').trim();
+  if(!t)throw new Error('empty');
+  history.push({role:'model',parts:[{text:t}]});
+  return t;
+}
+const JOKES=["Why did the phone go to school? To get a little smarter.","I told my computer I needed a break, and now it won’t stop sending me vacation ads.","Why don’t eyes ever lie? Because they’re always looking out for you.","What do you call a robot that takes the long way? R2 detour."];
+async function wiki(topic){
+  const u='https://en.wikipedia.org/w/api.php?action=query&generator=search&gsrsearch='+encodeURIComponent(topic)+'&gsrlimit=1&prop=extracts&exintro=1&explaintext=1&exsentences=2&format=json&origin=*';
+  const j=await (await fetch(u)).json();
+  const p=j.query&&Object.values(j.query.pages)[0];
+  return p&&p.extract?p.extract.replace(/\s*\([^)]*\)/g,'').trim():null;
+}
+async function localBrain(q){
+  const l=q.toLowerCase().replace(/[?!.]+$/,'').trim();
+  if(/^(hi|hello|hey)\b/.test(l))return'Hello! I’m watching over your desk.';
+  let m=l.match(/timer for (\d+)\s*(second|minute|hour)/);
+  if(m){const ms=m[1]*({second:1,minute:60,hour:3600}[m[2]])*1000;setTimeout(()=>{S.busy=true;say('Time’s up!');speak('Time’s up!')},ms);return'Okay, timer set for '+m[1]+' '+m[2]+(m[1]==='1'?'':'s')+'.'}
+  if(/what('s| is) the time|what time|current time/.test(l))return'It’s '+new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})+'.';
+  if(/\b(date|what day|today)\b/.test(l))return'Today is '+new Date().toLocaleDateString([],{weekday:'long',month:'long',day:'numeric'})+'.';
+  const ex=l.replace(/^(what is|what’s|what's|calculate|how much is)\s+/,'').replace(/ plus /g,'+').replace(/ minus /g,'-').replace(/ (times|multiplied by|x) /g,'*').replace(/ (divided by|over) /g,'/');
+  if(/\d/.test(ex)&&/[+\-*/]/.test(ex)&&/^[\d\s+\-*/().]+$/.test(ex)){try{const v=Function('return('+ex+')')();if(isFinite(v))return'That’s '+(+v.toFixed(4))+'.'}catch(e){}}
+  if(/joke|make me laugh/.test(l))return JOKES[Math.random()*JOKES.length|0];
+  m=l.match(/^(?:who is|who was|who are|what is|what are|what was|tell me about|define|explain)\s+(?:a |an |the )?(.+)/);
+  if(m){try{const w=await wiki(m[1]);if(w)return w}catch(e){}return'I couldn’t look that up right now.'}
+  return'I can tell the time, do maths, set timers, tell jokes, and look things up. Add a free Gemini key under Brain for real conversations.';
+}
+async function ask(q){
+  q=q.trim();if(!q)return;
+  S.busy=true;say('“'+q+'”');setMood('thinking');
+  let reply;const key=store.get('pip_key');
+  try{if(key)reply=await gemini(q,key);else reply=await localBrain(q)}
+  catch(e){reply=(key?'My AI brain had a hiccup, so here’s my simple answer. ':'')+await localBrain(q)}
+  say(reply);speak(reply);
+}
+function speak(text){
+  if(!('speechSynthesis' in window)){setMood('happy');setTimeout(done,1500);return}
+  speechSynthesis.cancel();
+  const u=new SpeechSynthesisUtterance(text);u.pitch=1.3;u.rate=1.05;
+  u.onstart=()=>setMood('speaking');
+  u.onend=u.onerror=()=>{setMood('happy');setTimeout(done,500)};
+  speechSynthesis.speak(u);
+}
+function done(){S.busy=false;if(S.active)listen();else setMood('asleep')}
+
+// ---------- Hands-free listening ----------
+const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+let rec=null,fails=0;
+function listen(){
+  if(!S.active||S.busy||rec)return;
+  if(!SR){setMood('listening');say('Voice input isn’t supported here. Use the keyboard.');return}
+  rec=new SR();rec.lang=navigator.language||'en-US';rec.interimResults=false;rec.continuous=false;
+  let got=false;
+  rec.onstart=()=>{setMood('listening');if(fails<2)say('I’m listening…')};
+  rec.onresult=e=>{got=true;$('status').textContent='heard you';fails=0;const t=e.results[0][0].transcript;rec=null;ask(t)};
+  rec.onerror=e=>{
+    const c=e.error;
+    if(c==='not-allowed'||c==='service-not-allowed'){say('Mic blocked. Click the lock icon in the address bar, allow Microphone, then reload.');S.active=false;$('go').textContent='Wake Pip up';fails=9}
+    else if(c==='network'){say('This browser can’t reach its speech service. Try Chrome or Edge, or use the Keyboard button.');fails=9}
+    else if(c==='audio-capture'){say('I can’t find a microphone. Check your mic is plugged in and selected.');fails=9}
+    else if(c==='no-speech'){$('status').textContent='listening (heard nothing yet)'}
+    else if(c!=='aborted')fails++;
+  };
+  rec.onend=()=>{rec=null;if(!got&&S.active&&!S.busy&&fails<5)setTimeout(listen,350)};
+  try{rec.start()}catch(e){rec=null}
+}
+
+// ---------- Controls ----------
+let wake=null;
+async function wakeLock(){try{wake=await navigator.wakeLock.request('screen')}catch(e){}}
+document.addEventListener('visibilitychange',()=>{if(!document.hidden&&S.active)wakeLock()});
+$('go').onclick=async()=>{
+  if(S.active){
+    S.active=false;S.busy=false;if(rec){try{rec.abort()}catch(e){}rec=null}
+    speechSynthesis.cancel();stopCam();if(wake){wake.release();wake=null}
+    $('go').textContent='Wake Pip up';say('Zzz… tap to wake me.');setMood('asleep');return;
+  }
+  S.active=true;fails=0;$('go').textContent='Put Pip to sleep';
+  setMood('happy');say('Hi! I’m awake.');
+  wakeLock();await startCam();
+  if(S.cam)say('I can see you. Say something!');
+  setTimeout(listen,700);
+};
+$('flip').onclick=async()=>{S.facing=S.facing==='user'?'environment':'user';if(S.active)await startCam()};
+$('prev').onclick=()=>$('vid').classList.toggle('show');
+$('kbBtn').onclick=()=>{$('kb').classList.toggle('show');if($('kb').classList.contains('show'))$('q').focus()};
+$('brainBtn').onclick=()=>{const c=$('cfg');c.style.display=c.style.display==='flex'?'none':'flex';$('key').value=store.get('pip_key')};
+$('saveKey').onclick=()=>{store.set('pip_key',$('key').value.trim());$('cfg').style.display='none';history=[];say($('key').value.trim()?'Brain upgraded!':'Back to my simple brain.')};
+$('fs').onclick=()=>{const e=document.documentElement;(document.fullscreenElement?document.exitFullscreen():(e.requestFullscreen||e.webkitRequestFullscreen||(()=>{})).call(e))};
+const sendTyped=()=>{const v=$('q').value;$('q').value='';if(rec){try{rec.abort()}catch(e){}rec=null}ask(v)};
+$('send').onclick=sendTyped;
+$('q').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();sendTyped()}});
+</script>
+</body>
+</html>
